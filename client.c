@@ -45,14 +45,17 @@ struct ServerData {
 
 struct Sockets {
     int udp_socket;
+    struct sockaddr_in  udp_addr_server;
+
     int tcp_socket;
-}
+};
 
 // functions declaration
 void change_client_state(char *new_state);
 void parse_argv(int argc, const char  *argv[]);
 void parse_and_save_software_config_file_data(FILE *software_config_file);
 void print_message(char *to_print);
+void setup_UDP_socket();
 void send_package_via_udp_to_server(struct Package package_to_send);
 int get_waiting_time_after_sent(int reg_reqs_sent);
 int signup_on_server();
@@ -64,16 +67,14 @@ struct Package receive_package_via_udp_from_server();
           -f <network_dev_config_file>       */
 int main(int argc, const char* argv[]){
     parse_argv(argc, argv);
-    if (signup_on_server() == 0){
-        /* TO DO
-           thread 1
-           keep_in_touch_with_server();
-           thread 2
-           wait_for_commands();
-           join threads */
-        return 0;
-    }
-    return 1;
+    signup_on_server();
+    /* TO DO
+       thread 1
+       keep_in_touch_with_server();
+       thread 2
+       wait_for_commands();
+       join threads */
+    return 0;
 }
 
 // functions implementation
@@ -101,14 +102,12 @@ void parse_argv(int argc, const char* argv[]){
 }
 
 void parse_and_save_software_config_file_data(FILE *software_config_file){
-    char *line;
+    char line[60];
     char delim[] = " \n";
-    ssize_t read;
-    size_t len = 0;
     char *token;
 
     // read line by line
-    while ((read = getline(&line, &len, software_config_file)) != -1){
+    while (fgets(line, sizeof(line), software_config_file)){
         // split line to get attribute and value from line
         token = strtok(line, delim);
 
@@ -123,7 +122,7 @@ void parse_and_save_software_config_file_data(FILE *software_config_file){
             server_data.server_name_or_address = malloc(strlen(token) + 1);
             strcpy(server_data.server_name_or_address, token);
         } else if (strcmp(token, "Server-port") == 0){
-            server_data.server_udp_port = (int) strtok(NULL, delim);
+            server_data.server_udp_port = (int) *strtok(NULL, delim);
         }
     }
 }
@@ -170,7 +169,7 @@ unsigned char* get_packet_type_from_string(char *string){
 }
 
 int signup_on_server(){
-    setup_UDP_Socket();
+    setup_UDP_socket();
     for (int reg_processes_without_ack_received = 0; reg_processes_without_ack_received < Q; reg_processes_without_ack_received++){
         change_client_state("DISCONNECTED");
         for (int register_reqs_sent = 0; register_reqs_sent < P; register_reqs_sent++){
@@ -212,7 +211,7 @@ void setup_UDP_socket(){
     struct sockaddr_in addr_server,addr_cli;
 
     // gets server identity
-    ent = getHostByName(server_data.server_name_or_address);
+    ent = gethostbyname(server_data.server_name_or_address);
     if(!ent){
         print_message("setup UDP socket: ERROR -> Can't find server\n");
         return;
@@ -225,11 +224,25 @@ void setup_UDP_socket(){
         return;
     }
 
-    // Ompla l'estructrura d'adreça amb les adreces on farem el binding
+    /* Ompla l'estructrura d'adreça amb les adreces on farem el binding (acceptem
+       per qualsevol adreça local) */
     memset(&addr_cli,0,sizeof (struct sockaddr_in));
     addr_cli.sin_family=AF_INET;
     addr_cli.sin_addr.s_addr=htonl(INADDR_ANY);
     addr_cli.sin_port=htons(0);
+
+    // bind
+    if(bind(sockets.udp_socket,(struct sockaddr *)&addr_cli,sizeof(struct sockaddr_in)) < 0)
+    {
+        print_message("setup UDP socket: ERROR -> Could not bind socket\n");   
+        return;
+    }
+
+    /* Ompla l'estructura d'adreça amb l'adreça del servidor on enviem les dades */
+    memset(&sockets.udp_addr_server,0,sizeof (struct sockaddr_in));
+    sockets.udp_addr_server.sin_family=AF_INET;
+    sockets.udp_addr_server.sin_addr.s_addr=(((struct in_addr *)ent->h_addr)->s_addr);
+    sockets.udp_addr_server.sin_port=htons(server_data.server_udp_port);
 
 }
 
@@ -256,7 +269,11 @@ struct Package construct_register_request_package(){
 }
 
 void send_package_via_udp_to_server(struct Package package_to_send){
-    
+    int a;
+    a = sendto(sockets.udp_socket,package_to_send,sizeof(struct Package),0,(struct sockaddr*)&sockets.udp_addr_server,sizeof(sockets.udp_addr_server));
+    if(a < 0){
+          print_message("Send package via UDP socket: ERROR -> sendto()\n");
+    }
 }
 
 int get_waiting_time_after_sent(int reg_reqs_sent){
@@ -270,7 +287,8 @@ int get_waiting_time_after_sent(int reg_reqs_sent){
     return T;
 }
 
+/*
 struct Package receive_package_via_udp_from_server(){
 
-}
+} */
 
