@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
+
 #include <netdb.h>
 
 // program flow and execution defined variables
@@ -20,7 +21,7 @@ FILE *network_dev_config_file;
 struct DeviceData device_data;
 struct ServerData server_data;
 struct Sockets sockets;
-char *client_state;
+char *client_state = NULL;
 
 // structs
 struct Package {
@@ -59,7 +60,7 @@ void setup_UDP_socket();
 void send_package_via_udp_to_server(struct Package package_to_send);
 int get_waiting_time_after_sent(int reg_reqs_sent);
 int signup_on_server();
-unsigned char* get_packet_type_from_string();
+unsigned char get_packet_type_from_string();
 struct Package construct_register_request_package();
 struct Package receive_package_via_udp_from_server();
 
@@ -81,9 +82,9 @@ int main(int argc, const char* argv[]){
 void parse_argv(int argc, const char* argv[]){
     FILE *software_config_file;
 
-    for(int i = 1; i < argc; i++){
+    for(int i = 0; i < argc; i++){
         if(strcmp(argv[i], "-c") == 0){
-            software_config_file = fopen(argv[i+1], "r");
+            if(argc > i){ software_config_file = fopen(argv[i+1], "r"); }
         } else if(strcmp(argv[i], "-d") == 0){
             debug_mode = true;
             print_message("Debug mode enabled \n");
@@ -108,6 +109,7 @@ void parse_and_save_software_config_file_data(FILE *software_config_file){
 
     // read line by line
     while (fgets(line, sizeof(line), software_config_file)){
+
         // split line to get attribute and value from line
         token = strtok(line, delim);
 
@@ -128,9 +130,10 @@ void parse_and_save_software_config_file_data(FILE *software_config_file){
 }
 
 void change_client_state(char *new_state){
-    if(strcmp(client_state, new_state) != 0){
+    if(client_state == NULL || strcmp(client_state, new_state) != 0){
+        client_state = malloc(sizeof(new_state));
         strcpy(client_state, new_state);
-        char *message = NULL;
+        char message[50];
         sprintf(message, "Client state changed to: %s\n", client_state);
         print_message(message);
     }
@@ -149,20 +152,20 @@ void print_message(char *to_print){
     printf("%d:%d:%d -> %s", hour, minutes, secs, to_print);
 }
 
-unsigned char* get_packet_type_from_string(char *string){
-    unsigned char* packet_type = malloc(sizeof(unsigned char));
+unsigned char get_packet_type_from_string(char *string){
+    unsigned char packet_type;
 
     // signup process packet types
     if (strcmp(string, "REGISTER_REQ") == 0){
-        packet_type = (unsigned char*) 0x00;
+        packet_type = (unsigned char) 0x00;
     } else if (strcmp(string, "REGISTER_ACK") == 0){
-        packet_type = (unsigned char*) 0x01;
+        packet_type = (unsigned char) 0x01;
     } else if (strcmp(string, "REGISTER_NACK") == 0){
-        packet_type = (unsigned char*) 0x02;
+        packet_type = (unsigned char) 0x02;
     } else if (strcmp(string, "REGISTER_REJ") == 0){
-        packet_type = (unsigned char*) 0x03;
+        packet_type = (unsigned char) 0x03;
     } else if (strcmp(string, "ERROR") == 0){
-        packet_type = (unsigned char*) 0x09;
+        packet_type = (unsigned char) 0x09;
     }
 
     return packet_type;
@@ -180,14 +183,14 @@ int signup_on_server(){
             change_client_state("WAIT_REG");
             sleep(waiting_time_after_sent);
             server_answer = receive_package_via_udp_from_server();
-            if (server_answer.type == *(get_packet_type_from_string("REGISTER_REJ"))){
+            if (server_answer.type == get_packet_type_from_string("REGISTER_REJ")){
                 change_client_state("DISCONNECTED");
                 print_message("SIGNUP: ERROR -> Received REGISTER_REJ from server\n");
                 return 1;
-            } else if (server_answer.type == *(get_packet_type_from_string("REGISTER_NACK"))){
+            } else if (server_answer.type == get_packet_type_from_string("REGISTER_NACK")){
                 if(debug_mode){ print_message("SIGNUP: Received REGISTER_NACK from server\n");}
                 break;
-            } else if (server_answer.type == *(get_packet_type_from_string("REGISTER_ACK"))){ 
+            } else if (server_answer.type == get_packet_type_from_string("REGISTER_ACK")){ 
                 change_client_state("REGISTERED")   ;
                 if(debug_mode){ print_message("SIGNUP: Received REGISTER_ACK from server\n");}
                 return 0;
@@ -197,7 +200,7 @@ int signup_on_server(){
 
         sleep(S);
         if(debug_mode){ 
-            char *message = NULL;
+            char message[75];
             sprintf(message, "SIGNUP: Starting new signup process. Current tries: %d / %d\n", reg_processes_without_ack_received + 1, Q);
             print_message(message);
         }
@@ -208,7 +211,7 @@ int signup_on_server(){
 
 void setup_UDP_socket(){
     struct hostent *ent;
-    struct sockaddr_in addr_server,addr_cli;
+    struct sockaddr_in addr_cli;
 
     // gets server identity
     ent = gethostbyname(server_data.server_name_or_address);
@@ -241,7 +244,7 @@ void setup_UDP_socket(){
     /* Ompla l'estructura d'adreça amb l'adreça del servidor on enviem les dades */
     memset(&sockets.udp_addr_server,0,sizeof (struct sockaddr_in));
     sockets.udp_addr_server.sin_family=AF_INET;
-    sockets.udp_addr_server.sin_addr.s_addr=(((struct in_addr *)ent->h_addr)->s_addr);
+    sockets.udp_addr_server.sin_addr.s_addr=(((struct in_addr *)ent->h_addr_list[0])->s_addr);
     sockets.udp_addr_server.sin_port=htons(server_data.server_udp_port);
 
 }
@@ -258,7 +261,7 @@ struct Package construct_register_request_package(){
     random_num_as_string[6] = '\0';
 
     // fill Package
-    register_req.type = *(get_packet_type_from_string("REGISTER_REQ"));
+    register_req.type = get_packet_type_from_string("REGISTER_REQ");
     strcpy(register_req.dev_name, device_data.dev_name);
     strcpy(register_req.mac_address, device_data.dev_mac);
     strcpy(register_req.dev_random_num, random_num_as_string);
@@ -270,7 +273,7 @@ struct Package construct_register_request_package(){
 
 void send_package_via_udp_to_server(struct Package package_to_send){
     int a;
-    a = sendto(sockets.udp_socket,package_to_send,sizeof(struct Package),0,(struct sockaddr*)&sockets.udp_addr_server,sizeof(sockets.udp_addr_server));
+    a = sendto(sockets.udp_socket,&package_to_send,sizeof(struct Package),0,(struct sockaddr*)&sockets.udp_addr_server,sizeof(sockets.udp_addr_server));
     if(a < 0){
           print_message("Send package via UDP socket: ERROR -> sendto()\n");
     }
@@ -287,8 +290,10 @@ int get_waiting_time_after_sent(int reg_reqs_sent){
     return T;
 }
 
-/*
-struct Package receive_package_via_udp_from_server(){
 
-} */
+struct Package receive_package_via_udp_from_server(){
+    struct Package r;
+    r.type = (unsigned char) 0x02;
+    return r;
+} 
 
