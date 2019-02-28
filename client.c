@@ -171,6 +171,25 @@ unsigned char get_packet_type_from_string(char *string){
     return packet_type;
 }
 
+char* get_packet_string_from_type(unsigned char type){
+    char*  packet_string;
+
+    // signup process packet types
+    if (type == (unsigned char) 0x00){
+        packet_string = "REGISTER_REQ";
+    } else if (type == (unsigned char) 0x01){
+        packet_string = "REGISTER_ACK";
+    } else if (type == (unsigned char) 0x03){
+        packet_string = "REGISTER_NACK";
+    } else if (type == (unsigned char) 0x04) {
+        packet_string = "REGISTER_REJ";
+    } else if (type == (unsigned char) 0x09) {
+        packet_string = "ERROR";
+    }
+
+    return packet_string;
+}
+
 int signup_on_server(){
     setup_UDP_socket();
     for (int reg_processes_without_ack_received = 0; reg_processes_without_ack_received < Q; reg_processes_without_ack_received++){
@@ -252,13 +271,13 @@ void setup_UDP_socket(){
 struct Package construct_register_request_package(){
     struct Package register_req;
 
-    // get random num - of 6 digits 
+    // get random num - of 7 digits
     srand(time(NULL));
-    int random_num = rand () % 1000000;
+    int random_num = rand () % 10000000;
     // convert random num to string
     char random_num_as_string[7];
     sprintf(random_num_as_string, "%d", random_num);
-    random_num_as_string[6] = '\0';
+    // random_num_as_string[6] = '\0';
 
     // fill Package
     register_req.type = get_packet_type_from_string("REGISTER_REQ");
@@ -275,7 +294,11 @@ void send_package_via_udp_to_server(struct Package package_to_send){
     int a;
     a = sendto(sockets.udp_socket,&package_to_send,sizeof(struct Package),0,(struct sockaddr*)&sockets.udp_addr_server,sizeof(sockets.udp_addr_server));
     if(a < 0){
-          print_message("Send package via UDP socket: ERROR -> sendto()\n");
+        print_message("Send package via UDP socket: ERROR -> sendto()\n");
+    }else if(debug_mode){
+        char message[30];
+        sprintf(message, "Sent %s package to server\n", get_packet_string_from_type(package_to_send.type));
+        print_message(message);
     }
 }
 
