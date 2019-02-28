@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
-
 #include <netdb.h>
 
 // program flow and execution defined variables
@@ -23,13 +22,22 @@ struct ServerData server_data;
 struct Sockets sockets;
 char *client_state = NULL;
 
-// structs
+// Simulates PDU for signup and keep in touch with server purposes
 struct Package {
     unsigned char type;
     char dev_name[7];
     char mac_address[13];
     char dev_random_num[7];
     char data[50];
+};
+
+// Simulates PDU for send-conf and get-conf purposes
+struct PackageForCommands {
+    unsigned char type;
+    char dev_name[7];
+    char mac_address[13];
+    char dev_random_num[7];
+    char data[150];
 };
 
 // device = machine where the client is running
@@ -282,7 +290,8 @@ struct Package construct_register_request_package(){
     register_req.type = get_packet_type_from_string("REGISTER_REQ");
     strcpy(register_req.dev_name, device_data.dev_name);
     strcpy(register_req.mac_address, device_data.dev_mac);
-    strcpy(register_req.dev_random_num, "1234567");
+    strcpy(register_req.dev_random_num, "000000");
+    strcpy(register_req.data, "");
 
     return register_req;
 }
