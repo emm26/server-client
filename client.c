@@ -312,7 +312,7 @@ void send_package_via_udp_to_server(struct Package package_to_send, char* curren
     }
 }
 
-int get_waiting_time_after_sent(int reg_reqs_sent){
+int get_waiting_time_after_sent(int reg_reqs_sent){ // note: reg_reqs_sent starts at 1
     if(reg_reqs_sent >= N){
         int times = 2 + (reg_reqs_sent - N);
         if(times > M){
@@ -325,8 +325,21 @@ int get_waiting_time_after_sent(int reg_reqs_sent){
 
 
 struct Package receive_package_via_udp_from_server(){
-    struct Package r;
-    r.type = (unsigned char) 0x08;
-    return r;
+    fd_set rfds;
+    struct Package server_answer;
+
+    FD_ZERO(&rfds); // clears set
+    FD_SET(sockets.udp_socket, &rdfs); // add socket descriptor to set
+    // if any data is in socket
+    if(select(sockets.udp_socket + 1, &rfds, NULL, NULL, NULL) > 0){
+        // receive from socket
+        int a;
+        a = recvfrom(sockets.udp_socket,  server_answer, sizeof(server_answer), 0, (struct sockaddr*) 0, (int*) 0);
+        if(a < 0){
+            print_message("ERROR -> Could not receive from UDP socket\n");
+            exit(1);
+        }
+    }
+    return server_answer;
 } 
 
