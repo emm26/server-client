@@ -197,9 +197,9 @@ char* get_packet_string_from_type(unsigned char type){
         packet_string = "REGISTER_REQ";
     } else if (type == (unsigned char) 0x01){
         packet_string = "REGISTER_ACK";
-    } else if (type == (unsigned char) 0x03){
+    } else if (type == (unsigned char) 0x02){
         packet_string = "REGISTER_NACK";
-    } else if (type == (unsigned char) 0x04) {
+    } else if (type == (unsigned char) 0x03) {
         packet_string = "REGISTER_REJ";
     } else if (type == (unsigned char) 0x09) {
         packet_string = "ERROR";
@@ -224,13 +224,10 @@ void signup_on_server(){
             server_answer = receive_package_via_udp_from_server();
             if (server_answer.type == get_packet_type_from_string("REGISTER_REJ")){
                 change_client_state("DISCONNECTED");
-                print_message("ERROR -> Received REGISTER_REJ during SIGNUP\n");
                 exit(1);
             } else if (server_answer.type == get_packet_type_from_string("REGISTER_NACK")){
-                if(debug_mode){ print_message("DEBUG -> Received REGISTER_NACK during SIGNUP\n");}
                 break;
             } else if (server_answer.type == get_packet_type_from_string("REGISTER_ACK")){
-                if(debug_mode){ print_message("DEBUG -> Received REGISTER_ACK during SIGNUP\n");}
                 change_client_state("REGISTERED");
                 return;
             } // else: NO_ANSWER -> Keep trying to contact server, keep looping
@@ -339,7 +336,7 @@ struct Package receive_package_via_udp_from_server(){
     fd_set rfds;
     struct timeval timeout;
     char* buf = malloc(sizeof(struct Package));
-    struct Package* server_answer = malloc(sizeof(struct Package));
+    struct Package* package_received = malloc(sizeof(struct Package));
 
     FD_ZERO(&rfds); // clears set
     FD_SET(sockets.udp_socket, &rfds); // add socket descriptor to set
@@ -352,10 +349,17 @@ struct Package receive_package_via_udp_from_server(){
         a = recvfrom(sockets.udp_socket, buf, sizeof(struct Package), 0, (struct sockaddr*) 0, (socklen_t*) 0);
         if(a < 0){
             print_message("ERROR -> Could not receive from UDP socket\n");
-            exit(1);
+        }else{
+            package_received = (struct Package*) buf;
+            if (debug_mode){
+                char message[200];
+                sprintf(message, "DEBUG -> Received %s; Bytes:%lu, name:%s, mac:%s, alea:%s, data:%s\n",
+                        get_packet_string_from_type((unsigned char)(*package_received).type), sizeof(*package_received), (*package_received).dev_name,
+                        (*package_received).mac_address, (*package_received).dev_random_num, (*package_received).data);
+                print_message(message);
+            }
         }
-        server_answer = (struct Package*) buf;
     }
-    return *(server_answer);
+    return *(package_received);
 } 
 
