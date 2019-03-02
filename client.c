@@ -100,17 +100,18 @@ void end_handler(int signal){
 
 void parse_argv(int argc, const char* argv[]){
     FILE *software_config_file = NULL;
-
     for(int i = 0; i < argc; i++){
         if(strcmp(argv[i], "-c") == 0){
             if(argc > i){ software_config_file = fopen(argv[i+1], "r"); }
         } else if(strcmp(argv[i], "-d") == 0){
             debug_mode = true;
-            print_message("INFO -> Debug mode enabled \n");
+            print_message("INFO -> Debug mode enabled\n");
         } else if(strcmp(argv[i], "-f") == 0){
             if(argc > i){ network_dev_config_file = fopen(argv[i+1], "r"); }
         }
     }
+
+    if (debug_mode){ print_message("DEBUG -> Read command line input\n");}
 
     if (software_config_file == NULL){ // open default
         software_config_file = fopen("client.cfg", "r");
@@ -119,6 +120,8 @@ void parse_argv(int argc, const char* argv[]){
         network_dev_config_file = fopen("boot.cfg", "r");
     }
     parse_and_save_software_config_file_data(software_config_file);
+
+    if(debug_mode){ print_message("DEBUG -> Read data from configuration files\n");}
 }
 
 void parse_and_save_software_config_file_data(FILE *software_config_file){
@@ -214,13 +217,12 @@ void signup_on_server(){
              reg_processes_without_ack_received++) {
 
         change_client_state("DISCONNECTED");
-        for (int register_reqs_sent = 1; register_reqs_sent <= P; register_reqs_sent++){
+        for (int register_reqs_sent = 0; register_reqs_sent < P; register_reqs_sent++){
             struct Package register_req = construct_register_request_package();
             struct Package server_answer;
-            int waiting_time_after_sent = get_waiting_time_after_sent(register_reqs_sent);
             send_package_via_udp_to_server(register_req, "SIGNUP");
             change_client_state("WAIT_REG");
-            sleep(waiting_time_after_sent);
+            sleep(get_waiting_time_after_sent(register_reqs_sent));
             server_answer = receive_package_via_udp_from_server();
             if (server_answer.type == get_packet_type_from_string("REGISTER_REJ")){
                 change_client_state("DISCONNECTED");
@@ -313,16 +315,23 @@ void send_package_via_udp_to_server(struct Package package_to_send, char* curren
         sprintf(message, "ERROR -> Could not send package via UDP socket during %s\n", currentFunction);
         print_message(message);
     } else if (debug_mode) {
-        sprintf(message, "DEBUG -> Sent %s; Bytes:%lu, name:%s, mac:%s, alea:%s, data:%s\n",
-                get_packet_string_from_type(package_to_send.type), sizeof(package_to_send), package_to_send.dev_name,
-                package_to_send.mac_address, package_to_send.dev_random_num, package_to_send.data);
+        sprintf(message,
+                "DEBUG -> Sent %s;\n"
+                "\t\t\tBytes:%lu,\n"
+                "\t\t\tname:%s,\n "
+                "\t\t\tmac:%s,\n"
+                "\t\t\talea:%s,\n"
+                "\t\t\tdata:%s\n\n",
+                get_packet_string_from_type(package_to_send.type), sizeof(package_to_send),
+                package_to_send.dev_name, package_to_send.mac_address, package_to_send.dev_random_num,
+                package_to_send.data);
         print_message(message);
     }
 }
 
-int get_waiting_time_after_sent(int reg_reqs_sent){ // note: reg_reqs_sent starts at 1
-    if(reg_reqs_sent >= N){
-        int times = 2 + (reg_reqs_sent - N);
+int get_waiting_time_after_sent(int reg_reqs_sent){ // note: reg_reqs_sent starts at 0
+    if(reg_reqs_sent >= N-1){
+        int times = 2 + (reg_reqs_sent + 1 - N);
         if(times > M){
             times = M;
         }
@@ -347,15 +356,23 @@ struct Package receive_package_via_udp_from_server(){
         // receive from socket
         int a;
         a = recvfrom(sockets.udp_socket, buf, sizeof(struct Package), 0, (struct sockaddr*) 0, (socklen_t*) 0);
-        if(a < 0){
+        if (a < 0) {
             print_message("ERROR -> Could not receive from UDP socket\n");
-        }else{
-            package_received = (struct Package*) buf;
-            if (debug_mode){
+        } else {
+            package_received = (struct Package *) buf;
+            if (debug_mode) {
                 char message[200];
-                sprintf(message, "DEBUG -> Received %s; Bytes:%lu, name:%s, mac:%s, alea:%s, data:%s\n",
-                        get_packet_string_from_type((unsigned char)(*package_received).type), sizeof(*package_received), (*package_received).dev_name,
-                        (*package_received).mac_address, (*package_received).dev_random_num, (*package_received).data);
+                sprintf(message,
+                        "DEBUG -> Received %s;\n"
+                        "\t\t\t    Bytes:%lu,\n"
+                        "\t\t\t    name:%s,\n "
+                        "\t\t\t    mac:%s,\n"
+                        "\t\t\t    alea:%s,\n"
+                        "\t\t\t    data:%s\n\n",
+                        get_packet_string_from_type((unsigned char) (*package_received).type),
+                        sizeof(*package_received), (*package_received).dev_name,
+                        (*package_received).mac_address, (*package_received).dev_random_num,
+                        (*package_received).data);
                 print_message(message);
             }
         }
