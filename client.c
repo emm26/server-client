@@ -80,7 +80,7 @@ int main(int argc, const char* argv[]){
     signal(SIGINT, end_handler);
     parse_argv(argc, argv);
     signup_on_server();
-    /* / TO DO
+    /*  TO DO
        thread 1
        keep_in_touch_with_server();
        thread 2
