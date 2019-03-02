@@ -2,9 +2,11 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <unistd.h>
 #include <time.h>
 #include <netdb.h>
+#include <sys/select.h>
 
 // program flow and execution defined variables
 #define M 4
@@ -16,7 +18,7 @@
 
 // global variables
 bool debug_mode = false;
-FILE *network_dev_config_file;
+FILE *network_dev_config_file = NULL;
 struct DeviceData device_data;
 struct ServerData server_data;
 struct Sockets sockets;
@@ -55,11 +57,11 @@ struct ServerData {
 struct Sockets {
     int udp_socket;
     struct sockaddr_in  udp_addr_server;
-
     int tcp_socket;
 };
 
 // functions declaration
+void end_handler(int signal);
 void change_client_state(char *new_state);
 void parse_argv(int argc, const char  *argv[]);
 void parse_and_save_software_config_file_data(FILE *software_config_file);
@@ -75,6 +77,7 @@ struct Package receive_package_via_udp_from_server();
 /* input: ./client -c <software_config_file> -d 
           -f <network_dev_config_file>       */
 int main(int argc, const char* argv[]){
+    signal(SIGINT, end_handler);
     parse_argv(argc, argv);
     signup_on_server();
     /* TO DO
@@ -87,8 +90,16 @@ int main(int argc, const char* argv[]){
 }
 
 // functions implementation
+
+void end_handler(int signal){
+    if (signal == SIGINT){
+        write(2, "\nExiting client...\n", 35);
+        exit(0);
+    }
+}
+
 void parse_argv(int argc, const char* argv[]){
-    FILE *software_config_file;
+    FILE *software_config_file = NULL;
 
     for(int i = 0; i < argc; i++){
         if(strcmp(argv[i], "-c") == 0){
@@ -97,7 +108,7 @@ void parse_argv(int argc, const char* argv[]){
             debug_mode = true;
             print_message("INFO -> Debug mode enabled \n");
         } else if(strcmp(argv[i], "-f") == 0){
-            network_dev_config_file = fopen(argv[i+1], "r");
+            if(argc > i){ network_dev_config_file = fopen(argv[i+1], "r"); }
         }
     }
 
@@ -116,7 +127,7 @@ void parse_and_save_software_config_file_data(FILE *software_config_file){
     char *token;
 
     // read line by line
-    while (fgets(line, sizeof(line), software_config_file)){
+    while (fgets(line, 70, software_config_file)){
         // split line to get attribute and value from line
         token = strtok(line, delim);
 
@@ -218,9 +229,9 @@ void signup_on_server(){
             } else if (server_answer.type == get_packet_type_from_string("REGISTER_NACK")){
                 if(debug_mode){ print_message("DEBUG -> Received REGISTER_NACK during SIGNUP\n");}
                 break;
-            } else if (server_answer.type == get_packet_type_from_string("REGISTER_ACK")){ 
-                change_client_state("REGISTERED")   ;
+            } else if (server_answer.type == get_packet_type_from_string("REGISTER_ACK")){
                 if(debug_mode){ print_message("DEBUG -> Received REGISTER_ACK during SIGNUP\n");}
+                change_client_state("REGISTERED");
                 return;
             } // else: NO_ANSWER -> Keep trying to contact server, keep looping
             if(debug_mode){
@@ -326,20 +337,25 @@ int get_waiting_time_after_sent(int reg_reqs_sent){ // note: reg_reqs_sent start
 
 struct Package receive_package_via_udp_from_server(){
     fd_set rfds;
-    struct Package server_answer;
+    struct timeval timeout;
+    char* buf = malloc(sizeof(struct Package));
+    struct Package* server_answer = malloc(sizeof(struct Package));
 
     FD_ZERO(&rfds); // clears set
-    FD_SET(sockets.udp_socket, &rdfs); // add socket descriptor to set
+    FD_SET(sockets.udp_socket, &rfds); // add socket descriptor to set
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 0; // return immediately
     // if any data is in socket
-    if(select(sockets.udp_socket + 1, &rfds, NULL, NULL, NULL) > 0){
+    if(select(sockets.udp_socket + 1, &rfds, NULL, NULL, &timeout) > 0){
         // receive from socket
         int a;
-        a = recvfrom(sockets.udp_socket,  server_answer, sizeof(server_answer), 0, (struct sockaddr*) 0, (int*) 0);
+        a = recvfrom(sockets.udp_socket, buf, sizeof(struct Package), 0, (struct sockaddr*) 0, (socklen_t*) 0);
         if(a < 0){
             print_message("ERROR -> Could not receive from UDP socket\n");
             exit(1);
         }
+        server_answer = (struct Package*) buf;
     }
-    return server_answer;
+    return *(server_answer);
 } 
 
