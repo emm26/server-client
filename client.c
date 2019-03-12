@@ -23,8 +23,8 @@
 /* global variables */
 bool debug_mode = false;
 FILE *network_dev_config_file = NULL;
-struct DeviceData device_data;
-struct ServerData server_data;
+struct Client client_data;
+struct Server server_data;
 struct Sockets sockets;
 char *client_state = NULL;
 pthread_t tids[2] = {(pthread_t) NULL, (pthread_t) NULL};
@@ -47,15 +47,16 @@ struct PackageForCommands {
     char data[150];
 };
 
-/* device = machine where the client is running */
-struct DeviceData {
-    char dev_name[9];
-    char dev_mac[13];
-    char dev_random_num[7];
+struct Client {
+    char name[9];
+    char mac_address[13];
 };
 
-struct ServerData {
-    char *server_name_or_address;
+struct Server {
+    char name[20];
+    char *address;
+    char mac_address[13];
+    char rand_num[7];
 };
 
 struct Sockets {
@@ -73,30 +74,20 @@ struct Sockets {
 /* functions declaration */
 void change_client_state(char *new_state);
 void end_handler(int signal);
-
 void *keep_in_touch_with_server();
-
 void *manage_command_line_input();
-
 void parse_argv(int argc, const char *argv[]);
 void parse_and_save_software_config_file_data(FILE *software_config_file);
-
 void print_accepted_commands();
 void print_message(char *to_print);
-
 void save_register_ack_data(struct Package package_received);
 void setup_UDP_socket();
-
 void setup_TCP_socket();
-
 void send_package_via_udp_to_server(struct Package package_to_send, char *currentFunction);
-
 void signup_on_server();
 int get_waiting_time_after_sent(int reg_reqs_sent);
-
 char *read_from_stdin(int max_chars_to_read);
 unsigned char get_packet_type_from_string();
-
 struct Package construct_alive_inf_package();
 struct Package construct_register_request_package();
 struct Package receive_package_via_udp_from_server();
@@ -145,7 +136,7 @@ void parse_argv(int argc, const char *argv[]) {
             if (argc > i) { software_config_file = fopen(argv[i + 1], "r"); }
         } else if (strcmp(argv[i], "-d") == 0) {
             debug_mode = true;
-            print_message("INFO -> Debug mode enabled\n");
+            print_message("INFO  -> Debug mode enabled\n");
         } else if (strcmp(argv[i], "-f") == 0) {
             if (argc > i) { network_dev_config_file = fopen(argv[i + 1], "r"); }
         }
@@ -175,14 +166,14 @@ void parse_and_save_software_config_file_data(FILE *software_config_file) {
 
         if (strcmp(token, "Nom") == 0) {
             token = strtok(NULL, delim);
-            strcpy(device_data.dev_name, token);
+            strcpy(client_data.name, token);
         } else if (strcmp(token, "MAC") == 0) {
             token = strtok(NULL, delim);
-            strcpy(device_data.dev_mac, token);
+            strcpy(client_data.mac_address, token);
         } else if (strcmp(token, "Server") == 0) {
             token = strtok(NULL, delim);
-            server_data.server_name_or_address = malloc(strlen(token) + 1);
-            strcpy(server_data.server_name_or_address, token);
+            server_data.address = malloc(strlen(token) + 1);
+            strcpy(server_data.address, token);
         } else if (strcmp(token, "Server-port") == 0) {
             sockets.udp_port = atoi(strtok(NULL, delim));
         }
@@ -194,7 +185,7 @@ void change_client_state(char *new_state) {
         client_state = malloc(sizeof(new_state));
         strcpy(client_state, new_state);
         char message[50];
-        sprintf(message, "INFO -> Client state changed to: %s\n", client_state);
+        sprintf(message, "INFO  -> Client state changed to: %s\n", client_state);
         print_message(message);
     }
 }
@@ -202,14 +193,12 @@ void change_client_state(char *new_state) {
 void print_message(char *to_print) {
     time_t now;
     struct tm *now_tm;
-    int hour, minutes, secs;
+    char formated_time[100];
 
     now = time(NULL);
     now_tm = localtime(&now);
-    hour = now_tm->tm_hour;
-    minutes = now_tm->tm_min;
-    secs = now_tm->tm_sec;
-    printf("%d:%d:%d - %s", hour, minutes, secs, to_print);
+    strftime(formated_time, 100, "%H:%M:%S", now_tm);
+    printf("%s - %s", formated_time, to_print);
     fflush(stdout); /* print immediately */
 }
 
@@ -272,6 +261,12 @@ char *get_packet_string_from_type(unsigned char type) {
 void signup_on_server() {
     for (int reg_processes_without_ack_received = 0; reg_processes_without_ack_received < Q;
          reg_processes_without_ack_received++) {
+        if (debug_mode) {
+            char message[75];
+            sprintf(message, "DEBUG -> Starting new signup process. Current tries: %d / %d\n",
+                    reg_processes_without_ack_received + 1, Q);
+            print_message(message);
+        }
         change_client_state("DISCONNECTED");
         for (int register_reqs_sent = 0; register_reqs_sent < P; register_reqs_sent++) {
             struct Package register_req;
@@ -281,7 +276,6 @@ void signup_on_server() {
             struct Package package_received;
             package_received = receive_package_via_udp_from_server(
                     get_waiting_time_after_sent(register_reqs_sent));
-            printf("sleeping %ld secs and %ld usecs\n", sockets.udp_timeout.tv_sec, sockets.udp_timeout.tv_usec);
             sleep(sockets.udp_timeout.tv_sec);
             usleep(sockets.udp_timeout.tv_usec);
             if (package_received.type == get_packet_type_from_string("REGISTER_REJ")) {
@@ -292,22 +286,22 @@ void signup_on_server() {
             } else if (package_received.type == get_packet_type_from_string("REGISTER_ACK")) {
                 change_client_state("REGISTERED");
                 save_register_ack_data(package_received);
+                if (debug_mode) {
+                    char message[150];
+                    sprintf(message,
+                            "Succesfully signed up on server: %s (name: %s, mac: %s, rand_num: %s, tcp port: %d)\n",
+                            server_data.address, server_data.name, server_data.mac_address,
+                            server_data.rand_num, sockets.tcp_port);
+                    print_message(message);
+                }
                 return;
             } /* else: NO_ANSWER -> Keep trying to contact server, keep looping */
             if (debug_mode) {
-                print_message("DEBUG -> No answer received for REGISTER_REQ\n");
+                print_message("DEBUG -> No answer received for REGISTER_REQ\n\n");
                 print_message("DEBUG -> Trying to reach server again...\n");
             }
         }
         sleep(S);
-        if (debug_mode) {
-            char message[75];
-            printf("\n");
-            sprintf(message, "DEBUG -> Starting new signup process. Current tries: %d / %d\n",
-                    reg_processes_without_ack_received + 1, Q);
-            print_message(message);
-        }
-
     }
     print_message("ERROR -> Could not contact server during SIGNUP\n");
     print_message("ERROR -> Maximum tries to contact server without REGISTER_ACK received reached\n");
@@ -319,7 +313,7 @@ void setup_UDP_socket() {
     struct sockaddr_in addr_cli;
 
     /* get server identity */
-    ent = gethostbyname(server_data.server_name_or_address);
+    ent = gethostbyname(server_data.address);
     if (!ent) {
         print_message("ERROR -> Can't find server on trying to setup UDP socket\n");
         exit(1);
@@ -357,8 +351,8 @@ struct Package construct_register_request_package() {
 
     /* fill Package */
     register_req.type = get_packet_type_from_string("REGISTER_REQ");
-    strcpy(register_req.dev_name, device_data.dev_name);
-    strcpy(register_req.mac_address, device_data.dev_mac);
+    strcpy(register_req.dev_name, client_data.name);
+    strcpy(register_req.mac_address, client_data.mac_address);
     strcpy(register_req.dev_random_num, "000000");
     strcpy(register_req.data, "");
 
@@ -375,11 +369,11 @@ void send_package_via_udp_to_server(struct Package package_to_send, char *curren
     } else if (debug_mode) {
         sprintf(message,
                 "DEBUG -> Sent %s;\n"
-                "\t\t\tBytes:%lu,\n"
-                "\t\t\tname:%s,\n "
-                "\t\t\tmac:%s,\n"
-                "\t\t\trand num:%s,\n"
-                "\t\t\tdata:%s\n\n",
+                "\t\t\t Bytes:%lu,\n"
+                "\t\t\t name:%s,\n "
+                "\t\t\t mac:%s,\n"
+                "\t\t\t rand num:%s,\n"
+                "\t\t\t data:%s\n",
                 get_packet_string_from_type(package_to_send.type), sizeof(package_to_send),
                 package_to_send.dev_name, package_to_send.mac_address, package_to_send.dev_random_num,
                 package_to_send.data);
@@ -420,12 +414,12 @@ struct Package receive_package_via_udp_from_server(int max_timeout) {
             if (debug_mode) {
                 char message[200];
                 sprintf(message,
-                        "DEBUG -> Received %s;\n"
-                        "\t\t\t    Bytes:%lu,\n"
-                        "\t\t\t    name:%s,\n "
-                        "\t\t\t    mac:%s,\n"
-                        "\t\t\t    rand num:%s,\n"
-                        "\t\t\t    data:%s\n\n",
+                        "DEBUG -> \t\t\t Received %s;\n"
+                        "\t\t\t\t\t Bytes:%lu,\n"
+                        "\t\t\t\t\t name:%s,\n "
+                        "\t\t\t\t\t mac:%s,\n"
+                        "\t\t\t\t\t rand num:%s,\n"
+                        "\t\t\t\t\t data:%s\n\n",
                         get_packet_string_from_type((unsigned char) (*package_received).type),
                         sizeof(*package_received), (*package_received).dev_name,
                         (*package_received).mac_address, (*package_received).dev_random_num,
@@ -440,7 +434,9 @@ struct Package receive_package_via_udp_from_server(int max_timeout) {
 /* Saves REG_ACK data from server which will be used to open a new
    TCP connection on setup_TCP_socket function */
 void save_register_ack_data(struct Package package_received) {
-    strcpy(device_data.dev_random_num, package_received.dev_random_num);
+    strcpy(server_data.rand_num, package_received.dev_random_num);
+    strcpy(server_data.name, package_received.dev_name);
+    strcpy(server_data.mac_address, package_received.mac_address);
     sockets.tcp_port = atoi(package_received.data);
 }
 
@@ -448,7 +444,7 @@ void setup_TCP_socket() {
     struct hostent *ent;
 
     /* gets server identity */
-    ent = gethostbyname(server_data.server_name_or_address);
+    ent = gethostbyname(server_data.address);
     if (!ent) {
         print_message("ERROR -> Can't find server on trying to setup TCP socket\n");
         exit(1);
@@ -507,7 +503,7 @@ char *read_from_stdin(int max_chars_to_read) {
 }
 
 void print_accepted_commands() {
-    print_message("INFO -> Accepted commands are: \n");
+    print_message("INFO  -> Accepted commands are: \n");
     printf("\t\t   quit -> finishes client\n");
     printf("\t\t   send-conf -> sends conf file to server via TCP\n");
     printf("\t\t   get-conf -> receives conf file from server via TCP\n");
@@ -519,17 +515,17 @@ void *keep_in_touch_with_server() {
         struct Package alive_inf = construct_alive_inf_package();
         send_package_via_udp_to_server(alive_inf, "KEEP IN TOUCH");
         struct Package server_answer = receive_package_via_udp_from_server(R);
-        printf("sleeping %ld secs and %ld usecs\n", sockets.udp_timeout.tv_sec, sockets.udp_timeout.tv_usec);
         sleep(sockets.udp_timeout.tv_sec);
         usleep(sockets.udp_timeout.tv_usec);
 
         if (server_answer.type == get_packet_type_from_string("ALIVE_ACK")) {
+            // TO DO: verify package's contents
             change_client_state("ALIVE");
             alives_inf_sent_without_answer = 0;
         } else if (server_answer.type == get_packet_type_from_string("ALIVE_REJ")) {
             alives_inf_sent_without_answer = 0;
             if (strcmp(client_state, "ALIVE") == 0) {
-                print_message("INFO -> Potential identity breach: Got ALIVE_REJ package when state was ALIVE\n");
+                print_message("INFO  -> Potential identity breach: Got ALIVE_REJ package when state was ALIVE\n");
                 pthread_cancel(tids[1]);
                 change_client_state("DISCONNECTED");
                 signup_on_server();
@@ -560,9 +556,9 @@ struct Package construct_alive_inf_package() {
 
     /* fill Package */
     alive_inf.type = get_packet_type_from_string("ALIVE_INF");
-    strcpy(alive_inf.dev_name, device_data.dev_name);
-    strcpy(alive_inf.mac_address, device_data.dev_mac);
-    strcpy(alive_inf.dev_random_num, device_data.dev_random_num);
+    strcpy(alive_inf.dev_name, client_data.name);
+    strcpy(alive_inf.mac_address, client_data.mac_address);
+    strcpy(alive_inf.dev_random_num, server_data.rand_num);
     strcpy(alive_inf.data, "");
 
     return alive_inf;
