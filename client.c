@@ -128,21 +128,35 @@ void parse_argv(int argc, const char *argv[]) {
     FILE *software_config_file = NULL;
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "-c") == 0) {
-            if (argc > i) { software_config_file = fopen(argv[i + 1], "r"); }
+            if (argc > i && access(argv[i + 1], F_OK) != -1) {
+                software_config_file = fopen(argv[i + 1], "r");
+            }
         } else if (strcmp(argv[i], "-d") == 0) {
             debug_mode = true;
             print_message("INFO  -> Debug mode enabled\n");
         } else if (strcmp(argv[i], "-f") == 0) {
-            if (argc > i) { network_dev_config_file = fopen(argv[i + 1], "r"); }
+            if (argc > i && access(argv[i + 1], F_OK) != -1) {
+                network_dev_config_file = fopen(argv[i + 1], "r");
+            }
         }
     }
     if (debug_mode) { print_message("DEBUG -> Read command line input\n"); }
 
     if (software_config_file == NULL) {
-        software_config_file = fopen("client.cfg", "r");
+        if (access("client.cfg", F_OK) != -1) {
+            software_config_file = fopen("client.cfg", "r");
+        } else {
+            print_message("ERROR -> Can't find default file named client.cfg in current directory\n");
+            exit(1);
+        }
     }
     if (network_dev_config_file == NULL) { // open default
-        network_dev_config_file = fopen("boot.cfg", "r");
+        if (access("boot.cfg", F_OK) != -1) {
+            network_dev_config_file = fopen("boot.cfg", "r");
+        } else {
+            print_message("ERROR -> Can't find default file named boot.cfg in current directory\n");
+            exit(1);
+        }
     }
     parse_and_save_software_config_file_data(software_config_file);
     if (debug_mode) { print_message("DEBUG -> Read data from configuration files\n"); }
