@@ -72,19 +72,13 @@ struct Sockets {
     struct sockaddr_in tcp_addr_server;
 };
 
-/* functions declaration */
+/* auxiliar functions declaration */
 bool is_received_package_valid(struct Package received_package);
-
 char *read_from_stdin(int max_chars_to_read);
-
 int get_waiting_time_after_sent(int reg_reqs_sent);
-
 struct Package construct_alive_inf_package();
-
 struct Package construct_register_request_package();
-
 struct Package receive_package_via_udp_from_server();
-
 unsigned char get_packet_type_from_string();
 void change_client_state(char *new_state);
 void end_handler(int signal);
@@ -95,24 +89,21 @@ void parse_and_save_software_config_file_data(FILE *software_config_file);
 void print_accepted_commands();
 void print_message(char *to_print);
 void save_register_ack_data(struct Package package_received);
+
+void service_loop();
 void setup_UDP_socket();
 void setup_TCP_socket();
 void send_package_via_udp_to_server(struct Package package_to_send, char *currentFunction);
 void signup_on_server();
 
-/* input: ./client -c <software_config_file> -d 
+/* input: ./myclient -c <software_config_file> -d
           -f <network_dev_config_file>       */
 int main(int argc, const char *argv[]) {
     signal(SIGINT, end_handler);
     parse_argv(argc, argv);
     setup_UDP_socket();
     client_data.unsuccessful_signups = 0;
-    signup_on_server();
-    setup_TCP_socket();
-    /* simultaneously read from command line and keep in touch with
-       server to make sure the server is alive */
-    pthread_create(&tid, NULL, manage_command_line_input, NULL);
-    keep_in_touch_with_server();
+    service_loop();
 
     return 0;
 }
@@ -180,6 +171,15 @@ void parse_and_save_software_config_file_data(FILE *software_config_file) {
             sockets.udp_port = atoi(strtok(NULL, delim));
         }
     }
+}
+
+void service_loop() {
+    signup_on_server();
+    setup_TCP_socket();
+    /* simultaneously read from command line and keep in touch with
+       server to make sure the server is alive */
+    pthread_create(&tid, NULL, manage_command_line_input, NULL);
+    keep_in_touch_with_server();
 }
 
 void change_client_state(char *new_state) {
@@ -308,7 +308,7 @@ void signup_on_server() {
         sleep(S);
         client_data.unsuccessful_signups++;
     }
-    print_message("ERROR -> Could not contact server during SIGNUP\n");
+    print_message("ERROR -> Could not contact server\n");
     print_message("ERROR -> Maximum tries to contact server without REGISTER_ACK received reached\n");
     exit(1);
 }
@@ -420,12 +420,12 @@ struct Package receive_package_via_udp_from_server(int max_timeout) {
             if (debug_mode) {
                 char message[200];
                 sprintf(message,
-                        "DEBUG -> \t\t\t Received %s;\n"
-                        "\t\t\t\t\t Bytes:%lu,\n"
-                        "\t\t\t\t\t name:%s,\n "
-                        "\t\t\t\t\t mac:%s,\n"
-                        "\t\t\t\t\t rand num:%s,\n"
-                        "\t\t\t\t\t data:%s\n\n",
+                        "DEBUG -> \t\t Received %s;\n"
+                        "\t\t\t\t\t  Bytes:%lu,\n"
+                        "\t\t\t\t\t  name:%s,\n "
+                        "\t\t\t\t\t  mac:%s,\n"
+                        "\t\t\t\t\t  rand num:%s,\n"
+                        "\t\t\t\t\t  data:%s\n\n",
                         get_packet_string_from_type((unsigned char) (*received_package).type),
                         sizeof(*received_package), (*received_package).dev_name,
                         (*received_package).mac_address, (*received_package).dev_random_num,
@@ -546,7 +546,7 @@ void *keep_in_touch_with_server() {
                 pthread_cancel(tid); /* cancel thread reading from command line */
                 change_client_state("DISCONNECTED");
                 client_data.unsuccessful_signups++;
-                signup_on_server();
+                service_loop();
                 break;
             }
         } else { /* no answer */
@@ -562,7 +562,7 @@ void *keep_in_touch_with_server() {
                 pthread_cancel(tid); /* cancel thread reading from command line */
                 change_client_state("DISCONNECTED");
                 client_data.unsuccessful_signups++;
-                signup_on_server();
+                service_loop();
                 break;
             }
         }
