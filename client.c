@@ -501,7 +501,7 @@ char *read_from_stdin(int max_chars_to_read) {
 
 void send_configuration_file() {
     setup_TCP_socket();
-
+    //
 }
 
 void get_configuration_file() {
