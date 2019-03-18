@@ -19,10 +19,11 @@
 #define S 5
 #define T 2
 #define U 3
+#define W 4
 
 /* global variables */
 bool debug_mode = false;
-FILE *network_dev_config_file = NULL;
+char *network_dev_config_file_name = NULL;
 struct Client client_data;
 struct Server server_data;
 struct Sockets sockets;
@@ -32,23 +33,23 @@ pthread_t tid = (pthread_t) NULL;
 /* Simulates PDU for signup and keep in touch with server purposes */
 struct Package {
     unsigned char type;
-    char dev_name[7];
+    char name[7];
     char mac_address[13];
-    char dev_random_num[7];
+    char random_num[7];
     char data[50];
 };
 
 /* Simulates PDU for send-conf and get-conf purposes */
-struct PackageForCommands {
+struct ConfPackage {
     unsigned char type;
-    char dev_name[7];
+    char name[7];
     char mac_address[13];
-    char dev_random_num[7];
+    char random_num[7];
     char data[150];
 };
 
 struct Client {
-    char name[9];
+    char name[7];
     char mac_address[13];
     int unsuccessful_signups;
 };
@@ -73,31 +74,40 @@ struct Sockets {
 };
 
 /* auxiliar functions declaration */
-bool is_received_package_valid(struct Package received_package);
+bool is_received_package_via_tcp_valid(struct ConfPackage received_package);
+
+bool is_received_package_via_udp_valid(struct Package received_package);
+
+char *get_packet_string_from_type(unsigned char type);
 char *read_from_stdin(int max_chars_to_read);
 int get_waiting_time_after_sent(int reg_reqs_sent);
+
+struct ConfPackage construct_send_data_package(char *line_to_send);
+
+struct ConfPackage construct_send_end_package();
+
+struct ConfPackage construct_send_file_package(FILE *network_dev_config_file);
+
+struct ConfPackage receive_package_via_tcp_from_server();
 struct Package construct_alive_inf_package();
 struct Package construct_register_request_package();
 struct Package receive_package_via_udp_from_server();
 unsigned char get_packet_type_from_string();
 void change_client_state(char *new_state);
 void end_handler(int signal);
-
 void get_configuration_file();
 void *keep_in_touch_with_server();
 void *manage_command_line_input();
-
 void parse_and_save_software_config_file_data(FILE *software_config_file);
 void parse_argv(int argc, const char *argv[]);
 void print_accepted_commands();
 void print_message(char *to_print);
 void save_register_ack_data(struct Package package_received);
-
 void send_configuration_file();
 
+void send_package_via_tcp_to_server(struct ConfPackage package_to_send, char *currentFunction);
 void send_package_via_udp_to_server(struct Package package_to_send, char *currentFunction);
 void service_loop();
-
 void setup_TCP_socket();
 void setup_UDP_socket();
 void signup_on_server();
@@ -136,17 +146,21 @@ void end_handler(int signal) {
 void parse_argv(int argc, const char *argv[]) {
     FILE *software_config_file = NULL;
     for (int i = 0; i < argc; i++) {
-        if (strcmp(argv[i], "-c") == 0) {
-            if (argc > i && access(argv[i + 1], F_OK) != -1) {
+        if (strcmp(argv[i], "-c") == 0 && argc > (i + 1)) {
+            if (access(argv[i + 1], F_OK) != -1) {
                 software_config_file = fopen(argv[i + 1], "r");
+            } else {
+                char message[200];
+                sprintf(message, "ERROR -> Can't open file named: '%s'. Will open client.cfg (default config. file)\n",
+                        argv[i + 1]);
+                print_message(message);
             }
         } else if (strcmp(argv[i], "-d") == 0) {
             debug_mode = true;
-            print_message("INFO  -> Debug mode enabled\n");
-        } else if (strcmp(argv[i], "-f") == 0) {
-            if (argc > i && access(argv[i + 1], F_OK) != -1) {
-                network_dev_config_file = fopen(argv[i + 1], "r");
-            }
+            print_message("INFO  -> Debug mode enabled (-d)\n");
+        } else if (strcmp(argv[i], "-f") == 0 && argc > (i + 1)) {
+            network_dev_config_file_name = malloc(sizeof(argv[i + 1]));
+            strcpy(network_dev_config_file_name, argv[i + 1]);
         }
     }
     if (debug_mode) { print_message("DEBUG -> Read command line input\n"); }
@@ -159,13 +173,9 @@ void parse_argv(int argc, const char *argv[]) {
             exit(1);
         }
     }
-    if (network_dev_config_file == NULL) { // open default
-        if (access("boot.cfg", F_OK) != -1) {
-            network_dev_config_file = fopen("boot.cfg", "r");
-        } else {
-            print_message("ERROR -> Can't find default file named boot.cfg in current directory\n");
-            exit(1);
-        }
+    if (network_dev_config_file_name == NULL) { // save default
+        network_dev_config_file_name = malloc(sizeof("boot.cfg"));
+        strcpy(network_dev_config_file_name, "boot.cfg");
     }
     parse_and_save_software_config_file_data(software_config_file);
     if (debug_mode) { print_message("DEBUG -> Read data from configuration files\n"); }
@@ -321,9 +331,9 @@ struct Package construct_register_request_package() {
     struct Package register_req;
     /* fill Package */
     register_req.type = get_packet_type_from_string("REGISTER_REQ");
-    strcpy(register_req.dev_name, client_data.name);
+    strcpy(register_req.name, client_data.name);
     strcpy(register_req.mac_address, client_data.mac_address);
-    strcpy(register_req.dev_random_num, server_data.rand_num);
+    strcpy(register_req.random_num, server_data.rand_num);
     strcpy(register_req.data, "");
 
     return register_req;
@@ -341,8 +351,8 @@ unsigned char get_packet_type_from_string(char *string) {
         packet_type = (unsigned char) 0x02;
     } else if (strcmp(string, "REGISTER_REJ") == 0) {
         packet_type = (unsigned char) 0x03;
-        /* keep in touch packet types */
-    } else if (strcmp(string, "ALIVE_INF") == 0) {
+    } /* keep in touch packet types */
+    else if (strcmp(string, "ALIVE_INF") == 0) {
         packet_type = (unsigned char) 0x10;
     } else if (strcmp(string, "ALIVE_ACK") == 0) {
         packet_type = (unsigned char) 0x11;
@@ -350,7 +360,20 @@ unsigned char get_packet_type_from_string(char *string) {
         packet_type = (unsigned char) 0x12;
     } else if (strcmp(string, "ALIVE_REJ") == 0) {
         packet_type = (unsigned char) 0x13;
-    } else {
+    } /* send configuration packet types */
+    else if (strcmp(string, "SEND_FILE") == 0) {
+        packet_type = (unsigned char) 0x20;
+    } else if (strcmp(string, "SEND_ACK") == 0) {
+        packet_type = (unsigned char) 0x21;
+    } else if (strcmp(string, "SEND_NACK") == 0) {
+        packet_type = (unsigned char) 0x22;
+    } else if (strcmp(string, "SEND_REJ") == 0) {
+        packet_type = (unsigned char) 0x23;
+    } else if (strcmp(string, "SEND_DATA") == 0) {
+        packet_type = (unsigned char) 0x24;
+    } else if (strcmp(string, "SEND_END") == 0) {
+        packet_type = (unsigned char) 0x25;
+    } else { /* error */
         packet_type = (unsigned char) 0x09;
     }
 
@@ -373,7 +396,7 @@ void send_package_via_udp_to_server(struct Package package_to_send, char *curren
                 "\t\t\t rand num:%s,\n"
                 "\t\t\t data:%s\n",
                 get_packet_string_from_type(package_to_send.type), sizeof(package_to_send),
-                package_to_send.dev_name, package_to_send.mac_address, package_to_send.dev_random_num,
+                package_to_send.name, package_to_send.mac_address, package_to_send.random_num,
                 package_to_send.data);
         print_message(message);
     }
@@ -391,8 +414,8 @@ char *get_packet_string_from_type(unsigned char type) {
         packet_string = "REGISTER_NACK";
     } else if (type == (unsigned char) 0x03) {
         packet_string = "REGISTER_REJ";
-        /* keep in touch packet types */
-    } else if (type == (unsigned char) 0x10) {
+    } /* keep in touch packet types */
+    else if (type == (unsigned char) 0x10) {
         packet_string = "ALIVE_INF";
     } else if (type == (unsigned char) 0x11) {
         packet_string = "ALIVE_ACK";
@@ -400,7 +423,20 @@ char *get_packet_string_from_type(unsigned char type) {
         packet_string = "ALIVE_NACK";
     } else if (type == (unsigned char) 0x13) {
         packet_string = "ALIVE_REJ";
-    } else {
+    } /* send configuration packet types */
+    else if (type == (unsigned char) 0x20) {
+        packet_string = "SEND_FILE";
+    } else if (type == (unsigned char) 0x21) {
+        packet_string = "SEND_ACK";
+    } else if (type == (unsigned char) 0x22) {
+        packet_string = "SEND_NACK";
+    } else if (type == (unsigned char) 0x23) {
+        packet_string = "SEND_REJ";
+    } else if (type == (unsigned char) 0x24) {
+        packet_string = "SEND_DATA";
+    } else if (type == (unsigned char) 0x25) {
+        packet_string = "SEND_END";
+    } else { /* error */
         packet_string = "ERROR";
     }
 
@@ -448,23 +484,23 @@ struct Package receive_package_via_udp_from_server(int max_timeout) {
                         "\t\t\t\t\t  rand num:%s,\n"
                         "\t\t\t\t\t  data:%s\n\n",
                         get_packet_string_from_type((unsigned char) (*received_package).type),
-                        sizeof(*received_package), (*received_package).dev_name,
-                        (*received_package).mac_address, (*received_package).dev_random_num,
+                        sizeof(*received_package), (*received_package).name,
+                        (*received_package).mac_address, (*received_package).random_num,
                         (*received_package).data);
                 print_message(message);
             }
         }
     }
-    return *(received_package);
+    return *received_package;
 }
 
 /* Saves REG_ACK data from server which will be used to:
     1. open a new TCP connection on setup_TCP_socket function
-    2. verify the source of the packages on is_received_package_valid
+    2. verify the source of the packages on is_received_package_via_udp_valid
     function */
 void save_register_ack_data(struct Package received_package) {
-    strcpy(server_data.rand_num, received_package.dev_random_num);
-    strcpy(server_data.name, received_package.dev_name);
+    strcpy(server_data.rand_num, received_package.random_num);
+    strcpy(server_data.name, received_package.name);
     strcpy(server_data.mac_address, received_package.mac_address);
     sockets.tcp_port = atoi(received_package.data);
 }
@@ -500,13 +536,43 @@ char *read_from_stdin(int max_chars_to_read) {
 }
 
 void send_configuration_file() {
-    setup_TCP_socket();
-    //
-}
+    print_message("INFO -> Requested sending configuration file to server\n");
 
-void get_configuration_file() {
+    // check if file can be accessed
+    if (access(network_dev_config_file_name, F_OK) == -1) {
+        char message[200];
+        sprintf(message, "ERROR -> File %s cannot be accessed\n", network_dev_config_file_name);
+        print_message(message);
+        print_message("ERROR -> Unable to send configuration file to server\n");
+        close(sockets.tcp_socket);
+        return;
+    }
+    FILE *network_dev_config_file = fopen(network_dev_config_file_name, "r");
     setup_TCP_socket();
-    
+    struct ConfPackage send_file = construct_send_file_package(network_dev_config_file);
+    send_package_via_tcp_to_server(send_file, "sending configuration file");
+
+    struct ConfPackage received_package = receive_package_via_tcp_from_server(6);
+    if (sockets.tcp_timeout.tv_sec == 0) {
+        if (debug_mode) { print_message("ERROR -> No answer received for SEND_FILE package sent\n"); }
+        close(sockets.tcp_socket);
+        return;
+    } else if (!is_received_package_via_tcp_valid(received_package)) {
+        if (debug_mode) { print_message("ERROR -> Wrong package received for SEND_FILE package sent\n"); }
+        close(sockets.tcp_socket);
+        return;
+    }
+
+    char line[150];
+    /* read line by line */
+    while (fgets(line, 150, network_dev_config_file)) {
+        struct ConfPackage send_data = construct_send_data_package(line);
+        send_package_via_tcp_to_server(send_data, "sending configuration file");
+    }
+
+    struct ConfPackage send_end = construct_send_end_package();
+    send_package_via_tcp_to_server(send_end, "sending configuration file");
+    close(sockets.tcp_socket);
 }
 
 void setup_TCP_socket() {
@@ -540,6 +606,126 @@ void setup_TCP_socket() {
 
 }
 
+struct ConfPackage construct_send_file_package(FILE *network_dev_config_file) {
+    struct ConfPackage send_file;
+    char data[150];
+    long fileSize;
+
+    /* start filling Package */
+    send_file.type = get_packet_type_from_string("SEND_FILE");
+    strcpy(send_file.name, client_data.name);
+    strcpy(send_file.mac_address, client_data.mac_address);
+    strcpy(send_file.random_num, server_data.rand_num);
+
+    /* fill as data in package: <network_dev_config_file_name>,<network_dev_config_file bytes> */
+    fseek(network_dev_config_file, 0, SEEK_END);
+    fileSize = ftell(network_dev_config_file);
+    fseek(network_dev_config_file, 0, SEEK_SET);
+    /* concatenate network_dev_config_file_name and fileSize with comma (",") in between */
+    sprintf(data, "%s,%li", network_dev_config_file_name, fileSize);
+    /* finish filling Package, fill in data */
+    strcpy(send_file.data, data);
+
+    return send_file;
+}
+
+void send_package_via_tcp_to_server(struct ConfPackage package_to_send, char *currentFunction) {
+    if (write(sockets.tcp_socket, &package_to_send, sizeof(package_to_send)) == -1) {
+        char message[150];
+        sprintf(message, "ERROR -> Could not send package via TCP socket during %s\n", currentFunction);
+        print_message(message);
+    } else if (debug_mode) {
+        char message[280];
+        sprintf(message,
+                "DEBUG -> Sent %s;\n"
+                "\t\t\t Bytes:%lu,\n"
+                "\t\t\t name:%s,\n "
+                "\t\t\t mac:%s,\n"
+                "\t\t\t rand num:%s,\n"
+                "\t\t\t data:%s\n\n",
+                get_packet_string_from_type((unsigned char) package_to_send.type),
+                sizeof(package_to_send), package_to_send.name,
+                package_to_send.mac_address, package_to_send.random_num,
+                package_to_send.data);
+        print_message(message);
+    }
+}
+
+struct ConfPackage receive_package_via_tcp_from_server(int max_timeout) {
+    fd_set rfds;
+    char *buf = malloc(sizeof(struct ConfPackage));
+    struct ConfPackage *received_package = malloc(sizeof(struct ConfPackage));
+
+
+    FD_ZERO(&rfds); /* clears set */
+    FD_SET(sockets.tcp_socket, &rfds); /* add socket to descriptor set */
+    sockets.tcp_timeout.tv_sec = max_timeout;
+    /* if any data in socket */
+    if (select(sockets.tcp_socket + 1, &rfds, NULL, NULL, &sockets.tcp_timeout) > 0) {
+        read(sockets.tcp_socket, buf, sizeof(struct ConfPackage));
+        received_package = (struct ConfPackage *) buf;
+        if (debug_mode) {
+            char message[280];
+            sprintf(message,
+                    "DEBUG -> \t\t Received %s;\n"
+                    "\t\t\t\t\t  Bytes:%lu,\n"
+                    "\t\t\t\t\t  name:%s,\n "
+                    "\t\t\t\t\t  mac:%s,\n"
+                    "\t\t\t\t\t  rand num:%s,\n"
+                    "\t\t\t\t\t  data:%s\n\n",
+                    get_packet_string_from_type((unsigned char) (*received_package).type),
+                    sizeof(*received_package), (*received_package).name,
+                    (*received_package).mac_address, (*received_package).random_num,
+                    (*received_package).data);
+            print_message(message);
+        }
+    }
+
+    return *received_package;
+}
+
+bool is_received_package_via_tcp_valid(struct ConfPackage received_package) {
+    char expected_data[150];
+    sprintf(expected_data, "%s.cfg", client_data.name);
+
+    return (get_packet_type_from_string("SEND_ACK") == received_package.type &&
+            strcmp(server_data.name, received_package.name) == 0 &&
+            strcmp(server_data.mac_address, received_package.mac_address) == 0 &&
+            strcmp(server_data.rand_num, received_package.random_num) == 0 &&
+            strcmp(expected_data, received_package.data) == 0);
+}
+
+struct ConfPackage construct_send_data_package(char *line_to_send) {
+    struct ConfPackage send_data;
+
+    /* start filling Package */
+    send_data.type = get_packet_type_from_string("SEND_DATA");
+    strcpy(send_data.name, client_data.name);
+    strcpy(send_data.mac_address, client_data.mac_address);
+    strcpy(send_data.random_num, server_data.rand_num);
+    strcpy(send_data.data, line_to_send);
+
+    return send_data;
+}
+
+struct ConfPackage construct_send_end_package() {
+    struct ConfPackage send_end;
+
+    /* start filling Package */
+    send_end.type = get_packet_type_from_string("SEND_END");
+    strcpy(send_end.name, client_data.name);
+    strcpy(send_end.mac_address, client_data.mac_address);
+    strcpy(send_end.random_num, server_data.rand_num);
+    strcpy(send_end.data, "");
+
+    return send_end;
+}
+
+void get_configuration_file() {
+    setup_TCP_socket();
+    
+}
+
 void print_accepted_commands() {
     print_message("INFO  -> Accepted commands are: \n");
     printf("\t\t    quit -> finishes client\n");
@@ -559,12 +745,12 @@ void *keep_in_touch_with_server() {
         usleep(sockets.udp_timeout.tv_usec);
 
         if (received_package.type == get_packet_type_from_string("ALIVE_ACK") &&
-            is_received_package_valid(received_package)) {
-            change_client_state("ALIVE");
+            is_received_package_via_udp_valid(received_package)) {
+            if (strcmp(client_state, "ALIVE") != 0) { change_client_state("ALIVE"); }
             alives_inf_sent_without_valid_ack_answer = 0;
 
         } else if (received_package.type == get_packet_type_from_string("ALIVE_ACK") &&
-                   !is_received_package_valid(received_package)) { /* not valid package */
+                   !is_received_package_via_udp_valid(received_package)) { /* not valid package */
             alives_inf_sent_without_valid_ack_answer++;
             if (debug_mode) {
                 char message[170];
@@ -608,9 +794,9 @@ struct Package construct_alive_inf_package() {
     struct Package alive_inf;
     /* fill Package */
     alive_inf.type = get_packet_type_from_string("ALIVE_INF");
-    strcpy(alive_inf.dev_name, client_data.name);
+    strcpy(alive_inf.name, client_data.name);
     strcpy(alive_inf.mac_address, client_data.mac_address);
-    strcpy(alive_inf.dev_random_num, server_data.rand_num);
+    strcpy(alive_inf.random_num, server_data.rand_num);
     strcpy(alive_inf.data, "");
 
     return alive_inf;
@@ -619,8 +805,8 @@ struct Package construct_alive_inf_package() {
 /* Checks if the received_package's contents are the same as the ones received
    on the first ever valid package received from server: REGISTER_ACK. The goal
    is to make sure the package does come from the server */
-bool is_received_package_valid(struct Package received_package) {
-    return (strcmp(server_data.name, received_package.dev_name) == 0 &&
+bool is_received_package_via_udp_valid(struct Package received_package) {
+    return (strcmp(server_data.name, received_package.name) == 0 &&
             strcmp(server_data.mac_address, received_package.mac_address) == 0 &&
-            strcmp(server_data.rand_num, received_package.dev_random_num) == 0);
+            strcmp(server_data.rand_num, received_package.random_num) == 0);
 }
