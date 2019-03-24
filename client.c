@@ -79,7 +79,6 @@ bool is_received_package_via_udp_valid(struct Package received_package);
 char *get_packet_string_from_type(unsigned char type);
 char *read_from_stdin(int max_chars_to_read);
 int get_waiting_time_after_sent(int reg_reqs_sent);
-
 struct ConfPackage construct_get_file_package(FILE *network_dev_config_file);
 struct ConfPackage construct_send_data_package(char *line_to_send);
 struct ConfPackage construct_send_end_package();
