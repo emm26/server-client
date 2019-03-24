@@ -802,7 +802,9 @@ void get_configuration_file() {
         received_package = receive_package_via_tcp_from_server(W);
         if (sockets.tcp_timeout.tv_sec == 0) {
             if (debug_mode) {
-                print_message("ERROR -> GET_DATA or GET_END package from server not received in time\n");
+                char message[150];
+                sprintf(message, "ERROR -> Have not received any data on TCP socket during %d seconds\n", W);
+                print_message(message);
             }
             close(sockets.tcp_socket);
             fclose(network_dev_config_file);
