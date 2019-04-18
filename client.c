@@ -728,13 +728,10 @@ bool is_received_package_via_tcp_valid(struct ConfPackage received_package, unsi
                 strcmp("", received_package.data) == 0);
     }
     /* if packet's type is different than GET_END */
-    char expected_data[150];
-    sprintf(expected_data, "%s.cfg", client_data.name);
     return (expected_type == received_package.type &&
             strcmp(server_data.name, received_package.name) == 0 &&
             strcmp(server_data.mac_address, received_package.mac_address) == 0 &&
-            strcmp(server_data.rand_num, received_package.random_num) == 0 &&
-            strcmp(expected_data, received_package.data) == 0);
+            strcmp(server_data.rand_num, received_package.random_num) == 0);
 }
 
 struct ConfPackage construct_send_data_package(char *line_to_send) {

@@ -198,6 +198,7 @@ def setup_udp_socket():
 def setup_tcp_socket():
     global sockets
     sockets.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sockets.tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sockets.tcp_socket.bind(("", sockets.tcp_port))
     sockets.tcp_socket.listen(5)
 
@@ -902,8 +903,9 @@ def keep_in_touch_with_client(client, first_alive_inf_timeout):
     :param client: client that must keep in touch
     :param first_alive_inf_timeout: maximum datetime to receive first alive_inf
     """
-    try:
-        while True:
+
+    while True:
+        try:
             if client.state == "REGISTERED":
                 is_first_alive_received = False
                 while datetime.now() < first_alive_inf_timeout:
@@ -942,9 +944,9 @@ def keep_in_touch_with_client(client, first_alive_inf_timeout):
                         clients_data_mutex.release()
                         return
                     clients_data_mutex.release()
-    # datetime.now() is None when main thread exits, so could throw AttributeError
-    except AttributeError:
-        return
+        # datetime.now() is None when main thread exits, so could throw AttributeError
+        except AttributeError:
+            return
 
 
 def serve_alive_inf(received_package_unpacked, client_ip_address, client_udp_port):

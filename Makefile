@@ -1,4 +1,4 @@
 all:
-	gcc client.c -ansi -std=c99 -pedantic -Wall -lpthread -o myclient
+	gcc client.c -ansi -std=c99 -pedantic -Wall -lpthread -o client
 clean:
-	-rm -fr myclient
+	-rm -fr client
