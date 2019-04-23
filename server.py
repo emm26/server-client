@@ -409,8 +409,8 @@ def receive_package_via_tcp_from_client(socket, bytes_to_receive):
 def serve_send_file(received_package_unpacked, client_ip_address, socket):
     """
     This method is executed when receiving a SEND_FILE package on tcp socket.
-    It processes the END_FILE package received and if everything goes correctly
-    creates a thread to keep track of received send_data packages timeout which
+    It processes the SEND_FILE package received and if everything goes correctly
+    creates a thread to keep track of received SEND_DATA packages timeout which
     will execute function keep_in_touch_send_data, and finally calls
     save_send_data_packages function.
 
@@ -486,8 +486,8 @@ def serve_send_file(received_package_unpacked, client_ip_address, socket):
             thread_for_send_data.daemon = True
             thread_for_send_data.start()
             save_send_data_packages(socket, to_write, client)
-            to_write.close()
             socket.close()
+            to_write.close()
             clients_data_mutex.acquire()
             client.conf_tcp_socket = None
             clients_data_mutex.release()
@@ -663,7 +663,7 @@ def construct_send_ack_package(client_name, client_random_num):
 def keep_in_touch_send_data(client, send_data_max_timeout):
     """
     Makes sure client stays in touch with server on tcp socket
-    by checking whether lient.is_data_received is True before a countdown.
+    by checking whether client.is_data_received is True before a countdown.
     :param client: client that must keep in touch
     :param send_data_max_timeout: datetime object that represents the receiving limit time
     """
@@ -714,11 +714,12 @@ def save_send_data_packages(socket, file_to_fill,  client):
 
         if received_package_unpacked[0] != get_packet_type_from_string("SEND_END"):
             file_to_fill.write(data)
+
         else:
             print_message("INFO  -> Client succesfully ended sending of configuration file. "
                           "Client: " + client.name + ", ip:" + client.ip_address +", mac:" +
                           client.mac_address + ", random num: " + str(client.random_num))
-            break
+            return
 
 
 def serve_udp_connection(received_package_unpacked, client_ip_address, client_udp_port):
