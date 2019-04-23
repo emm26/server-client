@@ -106,7 +106,7 @@ void setup_TCP_socket();
 void setup_UDP_socket();
 void signup_on_server();
 
-/* input: ./myclient {-d} {-c <software_config_file>}
+/* input: ./client {-d} {-c <software_config_file>}
            {-f <network_dev_config_file> }             */
 int main(int argc, const char *argv[]) {
     client_data.unsuccessful_signups = 0;
