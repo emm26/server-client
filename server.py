@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-# ! python v.2.7.14
+#!/usr/bin/python
+
 import os
 import random
 import signal
