@@ -16,4 +16,4 @@ The client-server model may be contrasted to the P2P model, in which clients con
 
 Where arguments inside '{}' are optional arguments.
 
-**use one terminal for each process, one for the server and as many terminals as desired for the clients**
+**Use one terminal for each process, one for the server and as many terminals as desired for the clients.**
