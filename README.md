@@ -15,3 +15,5 @@ The client-server model may be contrasted to the P2P model, in which clients con
 **client:** ./client *{-d}* *{-c <software_config_file>}* *{-f <network_dev_config_file>}*
 
 Where arguments inside '{}' are optional arguments.
+
+**use one terminal for each process, one for the server and as many terminals as desired for the clients**
